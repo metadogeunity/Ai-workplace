@@ -1,3 +1,4 @@
+import "./brand.js";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import AIOrganization from "./AIOrganization.jsx";

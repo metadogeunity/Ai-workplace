@@ -1,0 +1,13 @@
+{
+  "name": "ai-workplace",
+  "private": true,
+  "workspaces": [
+    "ai-organization"
+  ],
+  "scripts": {
+    "dev": "npm --workspace ai-organization run dev",
+    "build": "npm --workspace ai-organization run build",
+    "lint": "npm --workspace ai-organization run lint",
+    "preview": "npm --workspace ai-organization run preview"
+  }
+}

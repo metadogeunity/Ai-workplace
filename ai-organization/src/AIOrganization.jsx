@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useReducer, useMemo, useRef, createContext, useContext } from "react";
+import React, { useState, useEffect, useReducer, useRef, createContext, useContext, lazy, Suspense } from "react";
 import {
   Brain, Users, Network, Gauge, ListChecks, MessagesSquare, FolderKanban, BookOpen,
-  BarChart3, GitBranch, Settings, Search, Bell, HelpCircle, ChevronLeft, ChevronRight,
+  BarChart3, GitBranch, Settings, Search, Bell, HelpCircle,
   ChevronDown, Play, Pause, Check, X, RotateCcw, Sparkles, ArrowRight, ArrowLeft, Plus,
-  Zap, Shield, Target, TrendingUp, Activity, Cpu, Crown, Scale, Lightbulb, FlaskConical,
-  Megaphone, Code, Eye, Hand, Circle, Clock, Layers, Command, PanelLeft, User, ShieldCheck
+  Zap, Shield, Target, TrendingUp, Activity, Crown, Scale, FlaskConical,
+  Megaphone, Code, Eye, Hand, Circle, Clock, Layers, Command, PanelLeft, User
 } from "lucide-react";
-import { AreaChart, Area, BarChart, Bar, RadialBarChart, RadialBar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+
+const AnalyticsCharts = lazy(() => import("./AnalyticsCharts.jsx"));
 
 /* ============================================================ THEME / GLOBAL CSS */
 const GlobalStyles = () => (
@@ -106,8 +107,11 @@ const GlobalStyles = () => (
   @media (prefers-reduced-motion: reduce){
     .aio *{animation:none!important;transition:none!important}
   }
+  .mobile-menu-btn{display:none!important}
+  .mobile-nav{position:fixed;inset:0 auto 0 0;width:min(280px,84vw);z-index:60;background:var(--bg2);border-right:1px solid var(--line2);box-shadow:var(--shadow);display:flex;flex-direction:column}
   @media (max-width:900px){
     .hide-sm{display:none!important}
+    .mobile-menu-btn{display:inline-flex!important}
   }
   `}</style>
 );
@@ -268,6 +272,7 @@ const STATUS_META = {
   ready: { c: "var(--green)", l: "Ready" }, paused: { c: "var(--amber)", l: "Paused" }, revising: { c: "var(--amber)", l: "Revising" },
 };
 const PRIORITY_C = { High: "var(--red)", Medium: "var(--amber)", Low: "var(--tx3)" };
+const GENERATION_STEPS = ["Understanding your role", "Understanding your goal", "Identifying required capabilities", "Selecting specialist agents", "Assigning models", "Designing collaboration rules", "Creating your AI Manager"];
 
 /* ============================================================ STORE */
 const initialState = {
@@ -430,7 +435,24 @@ const Toggle = ({ on, onClick }) => (
 );
 
 /* ============================================================ ORG GRAPH (signature) */
-function OrgGraph({ mode = "hierarchy", height = 380, activeIds = [], onNode }) {
+function OrgGraphNode({ node, r = 26, color, active = false, Icon, label, sub, dashed, onClick }) {
+  return (
+    <g style={{ cursor: onClick ? "pointer" : "default" }} onClick={onClick}>
+      {active && <circle cx={node.x} cy={node.y} r={r + 12} fill="none" stroke={color} strokeWidth="1" opacity="0.25" className="nodepulse" />}
+      <circle cx={node.x} cy={node.y} r={r} fill="var(--surface2)" stroke={active ? color : "var(--line2)"} strokeWidth={active ? 1.6 : 1}
+        strokeDasharray={dashed ? "3 4" : "0"} style={{ filter: active ? `drop-shadow(0 0 10px ${color})` : "none", transition: ".3s" }} />
+      <foreignObject x={node.x - r} y={node.y - r} width={r * 2} height={r * 2}>
+        <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color }}>
+          <Icon size={r * 0.72} />
+        </div>
+      </foreignObject>
+      <text x={node.x} y={node.y + r + 16} textAnchor="middle" fill="var(--tx)" fontSize="12.5" fontWeight="560" style={{ letterSpacing: "-.01em" }}>{label}</text>
+      {sub && <text x={node.x} y={node.y + r + 31} textAnchor="middle" fill="var(--tx3)" fontSize="10.5">{sub}</text>}
+    </g>
+  );
+}
+
+function OrgGraph({ height = 380, activeIds = [], onNode }) {
   const { state } = useStore();
   const agents = state.agents;
   const W = 900, H = height;
@@ -453,24 +475,6 @@ function OrgGraph({ mode = "hierarchy", height = 380, activeIds = [], onNode }) 
     ...g, x: cols === 1 ? W / 2 : pad + (i * (W - pad * 2)) / (cols - 1), y: 172,
   }));
   const hub = { x: W / 2, y: hubY };
-
-  const NodeCircle = ({ n, r = 26, color, glow, icon: Icon, label, sub, dashed, onClick, status }) => {
-    const active = activeIds.includes(n?.id) || glow;
-    return (
-      <g style={{ cursor: onClick ? "pointer" : "default" }} onClick={onClick}>
-        {active && <circle cx={n.x} cy={n.y} r={r + 12} fill="none" stroke={color} strokeWidth="1" opacity="0.25" className="nodepulse" />}
-        <circle cx={n.x} cy={n.y} r={r} fill="var(--surface2)" stroke={active ? color : "var(--line2)"} strokeWidth={active ? 1.6 : 1}
-          strokeDasharray={dashed ? "3 4" : "0"} style={{ filter: active ? `drop-shadow(0 0 10px ${color})` : "none", transition: ".3s" }} />
-        <foreignObject x={n.x - r} y={n.y - r} width={r * 2} height={r * 2}>
-          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color }}>
-            <Icon size={r * 0.72} />
-          </div>
-        </foreignObject>
-        <text x={n.x} y={n.y + r + 16} textAnchor="middle" fill="var(--tx)" fontSize="12.5" fontWeight="560" style={{ letterSpacing: "-.01em" }}>{label}</text>
-        {sub && <text x={n.x} y={n.y + r + 31} textAnchor="middle" fill="var(--tx3)" fontSize="10.5">{sub}</text>}
-      </g>
-    );
-  };
 
   const edge = (x1, y1, x2, y2, active, color = "var(--violet)") => (
     <path d={`M${x1},${y1} C ${x1},${(y1 + y2) / 2} ${x2},${(y1 + y2) / 2} ${x2},${y2}`}
@@ -496,13 +500,13 @@ function OrgGraph({ mode = "hierarchy", height = 380, activeIds = [], onNode }) 
           </foreignObject>
         </g>
         {/* manager */}
-        <NodeCircle n={mgr} r={30} color="var(--violet2)" glow icon={Crown} label="AI Manager"
+        <OrgGraphNode node={mgr} r={30} color="var(--violet2)" active Icon={Crown} label="AI Manager"
           sub={`Supervising ${nodes.length}`} onClick={onNode ? () => onNode("manager") : undefined} />
         {/* agents */}
         {nodes.map(n => (
-          <NodeCircle key={n.id} n={n} r={26} color={STATUS_META[n.status]?.c || "var(--violet)"}
-            icon={iconForRole(n.role)} label={n.role} sub={n.model.split(" ")[0]}
-            status={n.status} onClick={onNode ? () => onNode(n.id) : undefined} />
+          <OrgGraphNode key={n.id} node={n} r={26} color={STATUS_META[n.status]?.c || "var(--violet)"}
+            Icon={iconForRole(n.role)} label={n.role} sub={n.model.split(" ")[0]} active={activeIds.includes(n.id)}
+            onClick={onNode ? () => onNode(n.id) : undefined} />
         ))}
         {/* hub */}
         <g>
@@ -565,7 +569,7 @@ function Landing() {
             <span style={{ display: "flex", alignItems: "center", gap: 7 }}><span className="dot pulse" style={{ background: "var(--cyan)", color: "var(--cyan)" }} /> Live organization</span>
             <span className="mono">Alex Morgan · Founder</span>
           </div>
-          <OrgGraph mode="hierarchy" height={340} activeIds={["a1", "a2", "a3"]} />
+          <OrgGraph height={340} activeIds={["a1", "a2", "a3"]} />
         </div>
       </section>
 
@@ -775,12 +779,11 @@ function OnboardModels() {
 }
 
 function Generating() {
-  const { state, dispatch } = useStore();
-  const items = ["Understanding your role", "Understanding your goal", "Identifying required capabilities", "Selecting specialist agents", "Assigning models", "Designing collaboration rules", "Creating your AI Manager"];
+  const { dispatch } = useStore();
   const [done, setDone] = useState(0);
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    if (done < items.length) { const t = setTimeout(() => setDone(d => d + 1), 520); return () => clearTimeout(t); }
+    if (done < GENERATION_STEPS.length) { const t = setTimeout(() => setDone(d => d + 1), 520); return () => clearTimeout(t); }
     else { const t = setTimeout(() => setReady(true), 500); return () => clearTimeout(t); }
   }, [done]);
   return (
@@ -793,7 +796,7 @@ function Generating() {
         <h1 className="scaleH" style={{ fontSize: 26, margin: "0 0 6px" }}>{ready ? "Your organization is ready." : "Designing your AI organization…"}</h1>
         <p style={{ color: "var(--tx2)", margin: "0 0 26px" }}>{ready ? `${state.agents.length} specialists and one Manager, built around your goal.` : "Assembling specialists around your mission."}</p>
         <div style={{ textAlign: "left", display: "flex", flexDirection: "column", gap: 10, marginBottom: 26 }}>
-          {items.map((t, i) => (
+          {GENERATION_STEPS.map((t, i) => (
             <div key={t} style={{ display: "flex", alignItems: "center", gap: 11, opacity: i < done ? 1 : i === done ? 0.9 : 0.3, transition: ".3s" }}>
               <span style={{ width: 20, height: 20, borderRadius: 99, display: "grid", placeItems: "center",
                 background: i < done ? "rgba(62,207,142,.15)" : "var(--surface2)", color: i < done ? "var(--green)" : "var(--tx3)", border: "1px solid var(--line2)" }}>
@@ -811,7 +814,7 @@ function Generating() {
 
 /* ============================================================ ORG REVIEW */
 function OrgReview() {
-  const { state, dispatch } = useStore();
+  const { dispatch } = useStore();
   const [sel, setSel] = useState(null);
   return (
     <div className="aio" style={{ minHeight: "100vh", position: "relative" }}>
@@ -820,7 +823,7 @@ function OrgReview() {
         <h1 className="scaleH" style={{ fontSize: 30, margin: "0 0 6px" }}>Meet your AI organization.</h1>
         <p style={{ color: "var(--tx2)", margin: "0 0 24px" }}>Tap any node to inspect it. The Manager coordinates the whole team.</p>
         <div className="glass" style={{ padding: "18px 8px 8px" }}>
-          <OrgGraph mode="hierarchy" height={400} activeIds={[]} onNode={(id) => setSel(id)} />
+          <OrgGraph height={400} activeIds={[]} onNode={(id) => setSel(id)} />
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 24 }}>
           <Btn variant="primary" icon={Zap} onClick={() => dispatch({ type: "NAV", route: "dashboard" })}>Launch organization</Btn>
@@ -880,12 +883,29 @@ function Shell({ children }) {
         </div>
       </aside>
 
+      {mobileOpen && <>
+        <div className="overlay" onClick={() => setMobileOpen(false)} />
+        <aside className="mobile-nav" aria-label="Mobile navigation">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 16px", fontWeight: 620, letterSpacing: "-.02em" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 10 }}><Logo />AI Organization</span>
+            <button className="btn btn-quiet btn-sm" aria-label="Close navigation" onClick={() => setMobileOpen(false)}><X size={16} /></button>
+          </div>
+          <nav style={{ padding: "6px 12px", display: "flex", flexDirection: "column", gap: 3, overflowY: "auto" }}>
+            {NAV_ITEMS.map(n => (
+              <button key={n.key} className={`navitem ${routeKey === n.key ? "active" : ""}`} onClick={() => { dispatch({ type: "NAV", route: n.key }); setMobileOpen(false); }}>
+                <n.icon size={16.5} style={{ flex: "none" }} /><span>{n.label}</span>
+              </button>
+            ))}
+          </nav>
+        </aside>
+      </>}
+
       {/* main */}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <header style={{ position: "sticky", top: 0, zIndex: 30, display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "12px 20px", borderBottom: "1px solid var(--line)", background: "rgba(9,10,15,.8)", backdropFilter: "blur(10px)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button className="btn btn-ghost btn-sm" style={{ display: "none" }} onClick={() => setMobileOpen(true)}><PanelLeft size={15} /></button>
+            <button className="btn btn-ghost btn-sm mobile-menu-btn" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><PanelLeft size={15} /></button>
             <button className="chip" style={{ cursor: "pointer" }}>
               <span className="dot" style={{ background: "var(--violet)" }} />Quantum Security Startup<ChevronDown size={13} />
             </button>
@@ -947,7 +967,7 @@ function Dashboard() {
             </div>
             <span style={{ fontSize: 12, color: "var(--tx3)" }}>{state.live ? "Streaming" : "Paused"}</span>
           </div>
-          <OrgGraph mode="hierarchy" height={360} activeIds={activeIds} onNode={(id) => dispatch({ type: "NAV", route: id === "manager" ? "manager" : "agent-detail", id })} />
+          <OrgGraph height={360} activeIds={activeIds} onNode={(id) => dispatch({ type: "NAV", route: id === "manager" ? "manager" : "agent-detail", id })} />
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", padding: "0 12px 10px", fontSize: 11.5, color: "var(--tx3)" }}>
             {Object.entries(STATUS_META).filter(([k]) => ["thinking", "working", "debating", "waiting", "approved"].includes(k)).map(([k, v]) => (
               <span key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}><span className="dot" style={{ background: v.c }} />{v.l}</span>
@@ -1001,7 +1021,11 @@ function Dashboard() {
 function DebatePanel({ onIntervene }) {
   const { state, dispatch } = useStore();
   const [shown, setShown] = useState(2);
-  useEffect(() => { setShown(2); const t = setInterval(() => setShown(s => Math.min(state.debate.rounds.length, s + 1)), 1400); return () => clearInterval(t); }, []);
+  const roundCount = state.debate.rounds.length;
+  useEffect(() => {
+    const t = setInterval(() => setShown(s => Math.min(roundCount, s + 1)), 1400);
+    return () => clearInterval(t);
+  }, [roundCount]);
   const agent = (id) => state.agents.find(a => a.id === id) || { name: "AI Manager", model: "GPT-5" };
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
@@ -1031,7 +1055,7 @@ function DebatePanel({ onIntervene }) {
             </div>
           );
         })}
-        {shown >= state.debate.rounds.length && (
+        {shown >= roundCount && (
           <div className="row-in" style={{ display: "flex", gap: 11, background: "var(--violetSoft)", padding: 12, borderRadius: 11, border: "1px solid rgba(124,92,255,.25)" }}>
             <span style={{ width: 28, height: 28, flex: "none", borderRadius: 8, background: "var(--surface)", display: "grid", placeItems: "center", color: "var(--violet2)" }}><Crown size={14} /></span>
             <div><div style={{ fontSize: 12.5, marginBottom: 2, fontWeight: 550 }}>AI Manager</div>
@@ -1048,7 +1072,6 @@ function ActivityFeed() {
   const [filter, setFilter] = useState("All");
   const filters = ["All", "Agents", "Manager", "Debates", "User"];
   const rows = state.activity.filter(a => filter === "All" || a.type === filter);
-  const actorName = (id) => state.agents.find(a => a.id === id)?.name || (id === "manager" ? "AI Manager" : id === "user" ? "You" : "System");
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden", maxHeight: 470, display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "14px 16px 10px", borderBottom: "1px solid var(--line)" }}>
@@ -1375,7 +1398,7 @@ const KCOLS = [
   { key: "approved", label: "Approved" }, { key: "complete", label: "Complete" },
 ];
 function TasksPage() {
-  const { state, dispatch } = useStore();
+  const { state } = useStore();
   const [sel, setSel] = useState(null);
   return (
     <div>
@@ -1508,7 +1531,7 @@ function DebateDetail() {
 
 /* ============================================================ PROJECTS */
 function ProjectsPage() {
-  const { state, dispatch } = useStore();
+  const { state } = useStore();
   return (
     <div>
       <SectionTitle right={<Btn variant="primary" icon={Plus} size="sm">New project</Btn>}>Projects</SectionTitle>
@@ -1583,33 +1606,9 @@ function AnalyticsPage() {
         <Metric icon={Clock} label="Time saved" value="~31h" accent="var(--green)" />
         <Metric icon={Hand} label="Human interventions" value={state.metrics.interventions} accent="var(--amber)" />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16, marginBottom: 16 }} className="dash-grid">
-        <div className="card" style={{ padding: 18 }}>
-          <SectionTitle>Task completion</SectionTitle>
-          <ResponsiveContainer width="100%" height={200}>
-            <AreaChart data={taskData} margin={{ left: -22, right: 6, top: 6 }}>
-              <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7C5CFF" stopOpacity={0.5} /><stop offset="100%" stopColor="#7C5CFF" stopOpacity={0} /></linearGradient></defs>
-              <CartesianGrid stroke="rgba(255,255,255,.05)" vertical={false} />
-              <XAxis dataKey="d" stroke="var(--tx3)" fontSize={11} tickLine={false} axisLine={false} />
-              <YAxis stroke="var(--tx3)" fontSize={11} tickLine={false} axisLine={false} />
-              <Tooltip contentStyle={{ background: "var(--bg2)", border: "1px solid var(--line2)", borderRadius: 10, fontSize: 12 }} />
-              <Area type="monotone" dataKey="done" stroke="#7C5CFF" strokeWidth={2} fill="url(#g1)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="card" style={{ padding: 18 }}>
-          <SectionTitle>Model utilization</SectionTitle>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={modelUse} margin={{ left: -22, right: 6, top: 6 }}>
-              <CartesianGrid stroke="rgba(255,255,255,.05)" vertical={false} />
-              <XAxis dataKey="m" stroke="var(--tx3)" fontSize={11} tickLine={false} axisLine={false} />
-              <YAxis stroke="var(--tx3)" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-              <Tooltip contentStyle={{ background: "var(--bg2)", border: "1px solid var(--line2)", borderRadius: 10, fontSize: 12 }} cursor={{ fill: "rgba(255,255,255,.03)" }} />
-              <Bar dataKey="v" fill="#2FD4E6" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      <Suspense fallback={<div className="card" style={{ padding: 18, color: "var(--tx2)", marginBottom: 16 }}>Loading charts…</div>}>
+        <AnalyticsCharts taskData={taskData} modelUse={modelUse} />
+      </Suspense>
       <div className="card" style={{ padding: 18 }}>
         <SectionTitle>Agent performance</SectionTitle>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -1757,7 +1756,7 @@ function OrgReviewShell() {
     <div>
       <SectionTitle right={<Btn variant="ghost" icon={Plus} size="sm">Add agent</Btn>}>My organization</SectionTitle>
       <div className="glass" style={{ padding: "16px 8px 6px" }}>
-        <OrgGraph mode="hierarchy" height={400} onNode={(id) => setSel(id)} />
+        <OrgGraph height={400} onNode={(id) => setSel(id)} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 12, marginTop: 16 }}>
         {state.agents.map(a => (
